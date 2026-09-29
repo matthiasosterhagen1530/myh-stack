@@ -44,7 +44,7 @@ jobs:
 
       - name: 🔎 Verify huggingface_hub
         run: |
-          python -c "import huggingface_hub; print('huggingface_hub:', huggingface_hub.__version__)"
+          python -c "import huggingface_hub; print('huggingface_hub version:', huggingface_hub.__version__)"
 
       - name: 🛠️ Provision & deploy the Space
         env:
