@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
+
 # ============================================================
 # Hermes Stack — one-click Hugging Face Space provisioning
 #
 # Runs inside GitHub Actions.
 #
-# Responsibilities:
+# Steps:
 #   1. Validate environment/secrets
 #   2. Authenticate with Hugging Face
-#   3. Create or reuse the Docker Space
-#   4. Create or reuse the private backup dataset
+#   3. Create or reuse Docker Space
+#   4. Create or reuse private backup dataset
 #   5. Inject Space secrets
 #   6. Inject Space variables
-#   7. Upload the local space/ directory
-#   8. Wait until the Space is RUNNING or fails
+#   7. Upload space/ directory
+#   8. Wait until Space is RUNNING
 # ============================================================
 
 from __future__ import annotations
@@ -27,16 +28,15 @@ try:
     from huggingface_hub import HfApi
 except ImportError:
     print(
-        "::error:: huggingface_hub is not installed — "
-        "run: python -m pip install huggingface_hub",
+        "::error:: huggingface_hub is not installed.",
         flush=True,
     )
     sys.exit(1)
 
 
-# ---------------------------------------------------------------------
+# ============================================================
 # Configuration
-# ---------------------------------------------------------------------
+# ============================================================
 
 SPACE_SECRETS = [
     "TELEGRAM_BOT_TOKEN",
@@ -65,51 +65,53 @@ REQUIRED = [
     "HF_SPACE_NAME",
 ]
 
-DRY_RUN = os.environ.get("DRY_RUN", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
+DRY_RUN = (
+    os.environ.get("DRY_RUN", "")
+    .strip()
+    .lower()
+    in ("1", "true", "yes")
+)
 
-PRIVATE_SPACE = os.environ.get("PRIVATE_SPACE", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
+PRIVATE_SPACE = (
+    os.environ.get("PRIVATE_SPACE", "")
+    .strip()
+    .lower()
+    in ("1", "true", "yes")
+)
 
 BUILD_TIMEOUT = int(
     os.environ.get("BUILD_TIMEOUT", "2700")
-)  # 45 minutes
+)
 
 POLL_INTERVAL = 30
 
 
-# ---------------------------------------------------------------------
+# ============================================================
 # Helpers
-# ---------------------------------------------------------------------
+# ============================================================
 
 def log(message: str) -> None:
-    """Print a line immediately to GitHub Actions logs."""
+    """Print message immediately."""
     print(message, flush=True)
 
 
 def github_error(message: str) -> None:
-    """Emit a GitHub Actions error annotation."""
+    """Emit GitHub Actions error annotation."""
     print(f"::error::{message}", flush=True)
 
 
 def github_warning(message: str) -> None:
-    """Emit a GitHub Actions warning annotation."""
+    """Emit GitHub Actions warning annotation."""
     print(f"::warning::{message}", flush=True)
 
 
 def env(name: str, default: str = "") -> str:
-    """Read and trim an environment variable."""
+    """Read and trim environment variable."""
     return (os.environ.get(name) or default).strip()
 
 
 def write_summary(text: str) -> None:
-    """Append Markdown content to the GitHub Actions step summary."""
+    """Append Markdown to GitHub Actions job summary."""
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
     if not summary_path:
@@ -120,12 +122,14 @@ def write_summary(text: str) -> None:
 
 
 def get_space_dir() -> Path:
-    """Return the absolute path to the repository's space/ directory."""
-    return Path(__file__).resolve().parent.parent / "space"
+    """Return repository space/ directory."""
+    return (
+        Path(__file__).resolve().parent.parent / "space"
+    )
 
 
 def validate_space_dir(space_dir: Path) -> list[str]:
-    """Validate that space/ exists and return its file list."""
+    """Validate space/ and return its files."""
     if not space_dir.exists():
         raise FileNotFoundError(
             f"Space directory does not exist: {space_dir}"
@@ -150,17 +154,28 @@ def validate_space_dir(space_dir: Path) -> list[str]:
     return files
 
 
+# ============================================================
+# Environment validation
+# ============================================================
+
 def check_env() -> tuple[str, str]:
-    """Validate mandatory environment variables."""
-    missing = [key for key in REQUIRED if not env(key)]
+    """Validate required environment variables."""
+
+    missing = [
+        key
+        for key in REQUIRED
+        if not env(key)
+    ]
 
     if missing:
         if DRY_RUN:
             github_warning(
                 "Dry-run without "
                 f"{', '.join(missing)} — "
-                "using placeholders. No HF API calls will be made."
+                "using placeholders. "
+                "No Hugging Face API calls will be made."
             )
+
             return "dry-user", "dry-space"
 
         github_error(
@@ -170,7 +185,7 @@ def check_env() -> tuple[str, str]:
 
         github_error(
             "Add HF_TOKEN / HF_USERNAME / HF_SPACE_NAME "
-            "to repository Secrets."
+            "to GitHub Repository Secrets."
         )
 
         sys.exit(1)
@@ -178,26 +193,26 @@ def check_env() -> tuple[str, str]:
     hf_user = env("HF_USERNAME")
     space_name = env("HF_SPACE_NAME")
 
-    # Hugging Face repo names may contain letters, digits, "-" and "_".
     if not space_name.replace("-", "").replace("_", "").isalnum():
         github_error(
-            "HF_SPACE_NAME may only contain letters, digits, "
-            "'-' and '_'."
+            "HF_SPACE_NAME may only contain "
+            "letters, digits, '-' and '_'."
         )
         sys.exit(1)
 
     return hf_user, space_name
 
 
-# ---------------------------------------------------------------------
-# Dry run
-# ---------------------------------------------------------------------
+# ============================================================
+# Dry Run
+# ============================================================
 
 def run_dry_run(
     repo_id: str,
     backup_repo: str,
 ) -> int:
-    """Perform local validation without contacting Hugging Face."""
+    """Validate deployment locally without HF API calls."""
+
     space_dir = get_space_dir()
 
     try:
@@ -207,7 +222,8 @@ def run_dry_run(
         return 1
 
     log(
-        f"[dry-run] space/ contains {len(files)} file(s):"
+        f"[dry-run] space/ contains "
+        f"{len(files)} file(s):"
     )
 
     for file_name in files:
@@ -225,7 +241,7 @@ def run_dry_run(
 
     write_summary(
         "## 🧪 Dry-run passed\n\n"
-        f"- Space folder valid (`{len(files)}` files)\n"
+        f"- Space folder valid (`{len(files)} files`)\n"
         f"- Would deploy to **`{repo_id}`**\n"
         f"- Backup dataset: `{backup_repo}`\n\n"
         "Run again with `dry_run=false` to deploy. 🚀\n"
@@ -239,16 +255,20 @@ def run_dry_run(
     return 0
 
 
-# ---------------------------------------------------------------------
-# Hugging Face authentication
-# ---------------------------------------------------------------------
+# ============================================================
+# Authentication
+# ============================================================
 
-def authenticate(api: HfApi, expected_user: str) -> bool:
-    """Validate the Hugging Face token and return success status."""
+def authenticate(
+    api: HfApi,
+    expected_user: str,
+) -> bool:
+    """Validate HF token."""
+
     try:
         who = api.whoami()
 
-        login = who.get("name") or "?"
+        login = who.get("name", "?")
 
         log(
             "[auth] Hugging Face token OK — "
@@ -257,17 +277,16 @@ def authenticate(api: HfApi, expected_user: str) -> bool:
 
         if login != expected_user:
             github_warning(
-                f"HF_USERNAME ('{expected_user}') != "
-                f"token owner ('{login}'). "
-                f"The repository will be created under "
-                f"'{expected_user}' if permitted by the token."
+                f"HF_USERNAME ('{expected_user}') "
+                f"!= token owner ('{login}')."
             )
 
         return True
 
     except Exception as exc:
         github_error(
-            f"HF token invalid, expired, or unavailable: {exc}"
+            "HF token invalid or expired: "
+            f"{exc}"
         )
 
         github_error(
@@ -279,9 +298,9 @@ def authenticate(api: HfApi, expected_user: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------
-# Create / reuse Space
-# ---------------------------------------------------------------------
+# ============================================================
+# Create / Reuse Space
+# ============================================================
 
 def create_space(
     api: HfApi,
@@ -291,45 +310,60 @@ def create_space(
     Create or reuse a Hugging Face Docker Space.
 
     IMPORTANT:
-    The correct argument is `space_sdk`, NOT `sdk`.
+        space_sdk="docker"
+
+    NOT:
+        sdk="docker"
     """
 
-    visibility = "private" if PRIVATE_SPACE else "public"
+    visibility = (
+        "private"
+        if PRIVATE_SPACE
+        else "public"
+    )
 
     log(
-        f"[1/5] Creating (or reusing) Space {repo_id} "
-        f"(space_sdk=docker, cpu-basic, {visibility})…"
+        f"[1/5] Creating (or reusing) "
+        f"Space {repo_id} "
+        f"(space_sdk=docker, "
+        f"cpu-basic, {visibility})…"
     )
 
-    # Current Hugging Face API:
-    #   space_sdk="docker"
-    #   space_hardware="cpu-basic"
+    # --------------------------------------------------------
+    # IMPORTANT FIX
     #
-    # NOT:
-    #   sdk="docker"
-    return str(
-        api.create_repo(
-            repo_id=repo_id,
-            repo_type="space",
-            space_sdk="docker",
-            private=PRIVATE_SPACE,
-            exist_ok=True,
-            space_hardware="cpu-basic",
-        )
+    # Old / incorrect:
+    #     sdk="docker"
+    #
+    # Correct Hugging Face API:
+    #     space_sdk="docker"
+    # --------------------------------------------------------
+
+    url = api.create_repo(
+        repo_id=repo_id,
+        repo_type="space",
+        space_sdk="docker",
+        private=PRIVATE_SPACE,
+        exist_ok=True,
+        space_hardware="cpu-basic",
     )
 
+    return str(url)
 
-# ---------------------------------------------------------------------
-# Create / reuse backup dataset
-# ---------------------------------------------------------------------
+
+# ============================================================
+# Backup Dataset
+# ============================================================
 
 def create_backup_dataset(
     api: HfApi,
     backup_repo: str,
 ) -> None:
-    """Create or reuse the private backup dataset."""
+    """Create or reuse private backup dataset."""
+
     log(
-        f"[1/5] Creating (or reusing) private backup dataset "
+        "[1/5] Creating (or reusing) "
+        f"private backup dataset "
         f"{backup_repo}…"
     )
 
@@ -341,24 +375,30 @@ def create_backup_dataset(
             exist_ok=True,
         )
 
-        log("      -> backup dataset ready")
+        log(
+            "      -> backup dataset ready"
+        )
 
     except Exception as exc:
         github_warning(
-            f"Could not create backup dataset: {exc}"
+            "Could not create backup dataset: "
+            f"{exc}"
         )
 
 
-# ---------------------------------------------------------------------
-# Space secrets
-# ---------------------------------------------------------------------
+# ============================================================
+# Space Secrets
+# ============================================================
 
 def inject_secrets(
     api: HfApi,
     repo_id: str,
 ) -> None:
-    """Inject non-empty environment values as Space secrets."""
-    log("[2/5] Injecting Space secrets…")
+    """Inject configured Space secrets."""
+
+    log(
+        "[2/5] Injecting Space secrets…"
+    )
 
     for key in SPACE_SECRETS:
         value = env(key)
@@ -381,17 +421,20 @@ def inject_secrets(
         )
 
 
-# ---------------------------------------------------------------------
-# Space variables
-# ---------------------------------------------------------------------
+# ============================================================
+# Space Variables
+# ============================================================
 
 def inject_variables(
     api: HfApi,
     repo_id: str,
     backup_repo: str,
 ) -> None:
-    """Inject environment values as Space variables."""
-    log("[3/5] Injecting Space variables…")
+    """Inject configured Space variables."""
+
+    log(
+        "[3/5] Injecting Space variables…"
+    )
 
     defaults = {
         "BACKUP_REPO": backup_repo,
@@ -429,15 +472,16 @@ def inject_variables(
             )
 
 
-# ---------------------------------------------------------------------
+# ============================================================
 # Upload Space
-# ---------------------------------------------------------------------
+# ============================================================
 
 def upload_space(
     api: HfApi,
     repo_id: str,
 ) -> None:
-    """Upload the local space/ directory to the Space repository."""
+    """Upload local space/ directory."""
+
     space_dir = get_space_dir()
 
     try:
@@ -457,27 +501,29 @@ def upload_space(
         repo_id=repo_id,
         repo_type="space",
         commit_message=(
-            "deploy: hermes-stack via GitHub Actions"
+            "deploy: hermes-stack "
+            "via GitHub Actions"
         ),
     )
 
     log(
         "      -> files uploaded. "
-        "Hugging Face build should start shortly."
+        "Hugging Face build should start."
     )
 
 
-# ---------------------------------------------------------------------
-# Runtime monitoring
-# ---------------------------------------------------------------------
+# ============================================================
+# Wait for Space
+# ============================================================
 
 def wait_for_space(
     api: HfApi,
     repo_id: str,
     hf_user: str,
     space_name: str,
+    backup_repo: str,
 ) -> int:
-    """Wait until the Space becomes RUNNING or enters an error state."""
+    """Wait for build/runtime status."""
 
     log(
         f"[5/5] Waiting for build "
@@ -502,7 +548,10 @@ def wait_for_space(
         "NO_APP_FILE",
     }
 
-    while time.time() - start < BUILD_TIMEOUT:
+    while (
+        time.time() - start
+        < BUILD_TIMEOUT
+    ):
         try:
             runtime = api.get_space_runtime(
                 repo_id=repo_id
@@ -515,7 +564,9 @@ def wait_for_space(
             )
 
             if stage != last_stage:
-                elapsed = int(time.time() - start)
+                elapsed = int(
+                    time.time() - start
+                )
 
                 log(
                     f"      [{elapsed:>4}s] "
@@ -526,7 +577,9 @@ def wait_for_space(
 
             if stage == "RUNNING":
                 log("")
-                log("🎉 SPACE IS RUNNING!")
+                log(
+                    "🎉 SPACE IS RUNNING!"
+                )
 
                 write_summary(
                     "## 🎉 Deployment successful — "
@@ -537,12 +590,12 @@ def wait_for_space(
                     f"| 🌐 Router dashboard | {app_url} |\n"
                     f"| 🧠 Agent web dashboard | {app_url}/hermes/ |\n"
                     f"| 🔌 Agent API | {app_url}/hermes-api/v1 |\n"
-                    f"| 💾 Backups | https://huggingface.co/datasets/{backup_repo_from_repo_id(repo_id)} |\n\n"
+                    f"| 💾 Backups | https://huggingface.co/datasets/{backup_repo} |\n\n"
                     "**Next steps**\n\n"
                     "1. Open the Telegram bot and send `/start`.\n"
                     "2. The Keep Space Awake workflow can ping "
                     "`/healthz` periodically.\n"
-                    "3. To change configuration, use "
+                    "3. Change configuration from "
                     "Space → Settings → Variables and secrets, "
                     "then restart the Space.\n"
                 )
@@ -551,11 +604,13 @@ def wait_for_space(
 
             if stage in error_stages:
                 github_error(
-                    f"Space entered error state: {stage}"
+                    f"Space entered error state: "
+                    f"{stage}"
                 )
 
                 github_error(
-                    f"Build logs: {space_url}/logs/build"
+                    f"Build logs: "
+                    f"{space_url}/logs/build"
                 )
 
                 write_summary(
@@ -575,7 +630,8 @@ def wait_for_space(
         time.sleep(POLL_INTERVAL)
 
     github_warning(
-        f"Timed out after {BUILD_TIMEOUT}s. "
+        f"Timed out after "
+        f"{BUILD_TIMEOUT}s. "
         "The build may still be running."
     )
 
@@ -587,27 +643,18 @@ def wait_for_space(
     return 0
 
 
-def backup_repo_from_repo_id(
-    repo_id: str,
-) -> str:
-    """
-    Build the default backup dataset name.
-
-    This is only a fallback for the summary URL.
-    The actual BACKUP_REPO value is already configured separately.
-    """
-    return f"{repo_id}-backup"
-
-
-# ---------------------------------------------------------------------
+# ============================================================
 # Main
-# ---------------------------------------------------------------------
+# ============================================================
 
 def main() -> int:
-    """Main deployment entry point."""
+    """Main deployment function."""
+
     hf_user, space_name = check_env()
 
-    repo_id = f"{hf_user}/{space_name}"
+    repo_id = (
+        f"{hf_user}/{space_name}"
+    )
 
     backup_repo = env(
         "BACKUP_REPO",
@@ -615,52 +662,61 @@ def main() -> int:
     )
 
     print("=" * 62)
+
     print(
         f" Target Space  : "
         f"https://huggingface.co/spaces/{repo_id}"
     )
+
     print(
         f" Backup dataset: "
         f"{backup_repo} (private)"
     )
+
     print(
         f" Mode          : "
         f"{'DRY-RUN (no HF calls)' if DRY_RUN else 'LIVE'}"
     )
+
     print(
         f" Visibility    : "
         f"{'PRIVATE' if PRIVATE_SPACE else 'public'}"
     )
+
     print("=" * 62)
 
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
     # Dry run
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+
     if DRY_RUN:
         return run_dry_run(
             repo_id=repo_id,
             backup_repo=backup_repo,
         )
 
-    # -------------------------------------------------------------
-    # Hugging Face API client
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+    # Hugging Face API
+    # --------------------------------------------------------
+
     api = HfApi(
         token=env("HF_TOKEN")
     )
 
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
     # Authentication
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+
     if not authenticate(
         api=api,
         expected_user=hf_user,
     ):
         return 1
 
-    # -------------------------------------------------------------
-    # Create / reuse Space
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+    # Create / Reuse Space
+    # --------------------------------------------------------
+
     try:
         url = create_space(
             api=api,
@@ -673,84 +729,100 @@ def main() -> int:
 
     except Exception as exc:
         github_error(
-            "Failed to create/reuse Hugging Face Space: "
-            f"{exc}"
+            "Failed to create/reuse "
+            f"Hugging Face Space: {exc}"
         )
 
         traceback.print_exc()
+
         return 1
 
-    # -------------------------------------------------------------
-    # Create / reuse backup dataset
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+    # Backup dataset
+    # --------------------------------------------------------
+
     create_backup_dataset(
         api=api,
         backup_repo=backup_repo,
     )
 
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
     # Secrets
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+
     try:
         inject_secrets(
             api=api,
             repo_id=repo_id,
         )
+
     except Exception as exc:
         github_error(
-            f"Failed while injecting Space secrets: {exc}"
+            "Failed while injecting "
+            f"Space secrets: {exc}"
         )
 
         traceback.print_exc()
+
         return 1
 
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
     # Variables
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+
     try:
         inject_variables(
             api=api,
             repo_id=repo_id,
             backup_repo=backup_repo,
         )
+
     except Exception as exc:
         github_error(
-            f"Failed while injecting Space variables: {exc}"
+            "Failed while injecting "
+            f"Space variables: {exc}"
         )
 
         traceback.print_exc()
+
         return 1
 
-    # -------------------------------------------------------------
-    # Upload application
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+    # Upload
+    # --------------------------------------------------------
+
     try:
         upload_space(
             api=api,
             repo_id=repo_id,
         )
+
     except Exception as exc:
         github_error(
-            f"Failed while uploading Space files: {exc}"
+            "Failed while uploading "
+            f"Space files: {exc}"
         )
 
         traceback.print_exc()
+
         return 1
 
-    # -------------------------------------------------------------
-    # Wait for build/runtime
-    # -------------------------------------------------------------
+    # --------------------------------------------------------
+    # Wait
+    # --------------------------------------------------------
+
     return wait_for_space(
         api=api,
         repo_id=repo_id,
         hf_user=hf_user,
         space_name=space_name,
+        backup_repo=backup_repo,
     )
 
 
-# ---------------------------------------------------------------------
+# ============================================================
 # Entry point
-# ---------------------------------------------------------------------
+# ============================================================
 
 if __name__ == "__main__":
     try:
@@ -761,7 +833,10 @@ if __name__ == "__main__":
 
     except Exception:
         traceback.print_exc()
+
         github_error(
-            "Unexpected failure — see traceback above."
+            "Unexpected failure — "
+            "see traceback above."
         )
+
         sys.exit(1)
