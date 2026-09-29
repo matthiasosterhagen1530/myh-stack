@@ -8,6 +8,7 @@ on:
         type: boolean
         required: false
         default: false
+
       private_space:
         description: "🔒 Create the Space as PRIVATE (only you can open it)"
         type: boolean
@@ -26,6 +27,7 @@ jobs:
     name: Provision & deploy Space
     runs-on: ubuntu-latest
     timeout-minutes: 60
+
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -36,17 +38,25 @@ jobs:
           python-version: "3.12"
 
       - name: 📦 Install huggingface_hub
-        run: pip install --quiet "huggingface_hub>=0.30"
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --quiet "huggingface_hub==2.0.0"
+
+      - name: 🔎 Verify huggingface_hub
+        run: |
+          python -c "import huggingface_hub; print('huggingface_hub:', huggingface_hub.__version__)"
 
       - name: 🛠️ Provision & deploy the Space
         env:
           DRY_RUN: ${{ inputs.dry_run }}
           PRIVATE_SPACE: ${{ inputs.private_space }}
-          # --- HF connection (set by the web wizard or manually) ---
+
+          # --- Hugging Face connection ---
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME }}
-          # --- app configuration copied into Space secrets ---
+
+          # --- App secrets ---
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
           HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
@@ -56,12 +66,16 @@ jobs:
           ROUTER_INITIAL_PASSWORD: ${{ secrets.ROUTER_INITIAL_PASSWORD }}
           DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+
+          # --- App variables ---
           BACKUP_REPO: ${{ secrets.BACKUP_REPO }}
           HERMES_MODEL: ${{ secrets.HERMES_MODEL }}
           HERMES_TIMEZONE: ${{ secrets.HERMES_TIMEZONE }}
           OMNI_ENABLED: ${{ secrets.OMNI_ENABLED }}
           HERMES_WEB_BACKEND: ${{ secrets.HERMES_WEB_BACKEND }}
-        run: python scripts/provision_space.py
+
+        run: |
+          python scripts/provision_space.py
 
       - name: ✅ Done
         if: always()
